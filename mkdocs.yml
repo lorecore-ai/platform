@@ -1,0 +1,36 @@
+site_name: LoreCore
+theme:
+  name: material
+
+  palette:
+    # System (auto)
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: System theme
+
+    # Light theme
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+
+    # Dark theme
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+nav:
+  - Home: index.md
+  - Modules: modules/index.md
+  - Integrations: integrations/index.md
+
+plugins:
+  - search
