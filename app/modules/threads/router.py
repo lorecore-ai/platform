@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.modules.agents.deps import get_agent_service
+from app.modules.agents.models import AgentType
 from app.modules.agents.service import AgentService
 from app.modules.threads.deps import (
     get_langchain_service,
@@ -39,7 +40,19 @@ async def create_thread(
     agent_service: AgentService = Depends(get_agent_service),
 ) -> ThreadRead:
     agent = await agent_service.get_by_id(data.agent_id)
-    if not agent or agent.tenant_id != tenant_id:
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent not found",
+        )
+    if agent.type not in (AgentType.System, AgentType.Worker):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Thread must use a system or worker agent",
+        )
+    is_platform = agent.tenant_id is None
+    is_tenant_agent = agent.tenant_id == tenant_id
+    if not (is_platform or is_tenant_agent):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Agent not found or does not belong to tenant",
@@ -106,10 +119,10 @@ async def send_message(
         raise _thread_not_found()
 
     agent = await agent_service.get_by_id(thread.agent_id)
-    if not agent:
+    if not agent or agent.type not in (AgentType.System, AgentType.Worker):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Agent not found",
+            detail="Agent not found or invalid",
         )
 
     history = await message_service.get_history(thread_id)
@@ -120,7 +133,6 @@ async def send_message(
         try:
             async for chunk in langchain_service.stream_response(
                 thread_id=thread_id,
-                agent=agent,
                 history=history,
                 user_content=data.content,
             ):

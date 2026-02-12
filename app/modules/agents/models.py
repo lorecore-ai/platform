@@ -2,7 +2,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, String, Text
+from sqlalchemy import Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,8 +10,11 @@ from app.core.database import Base
 
 
 class AgentType(str, enum.Enum):
-    Main = "main"
-    Worker = "worker"
+    """Типы агентов платформы."""
+
+    Human = "human"  # пользователь платформы
+    System = "system"  # системный LLM
+    Worker = "worker"  # специальная LLM для выполнения задач
 
 
 class Agent(Base):
@@ -22,13 +25,11 @@ class Agent(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    tenant_id: Mapped[uuid.UUID] = mapped_column(
+    tenant_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[AgentType] = mapped_column(Enum(AgentType), nullable=False)
-    model: Mapped[str] = mapped_column(String(255), nullable=False)
-    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)

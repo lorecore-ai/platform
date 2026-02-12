@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agents.models import Agent
 from app.modules.threads.models import Message, MessageRole
 
 logger = logging.getLogger(__name__)
@@ -16,6 +15,13 @@ logger = logging.getLogger(__name__)
 # In-memory map: thread_id -> asyncio.Task for cancellation on new user message
 _active_tasks: dict[uuid.UUID, asyncio.Task] = {}
 _tasks_lock = asyncio.Lock()
+
+# Заготовленные настройки LLM (платформа)
+LLM_CONFIG = {
+    "model": "gpt-4o-mini",
+    "system_prompt": "You are a helpful assistant.",
+    "temperature": 0.7,
+}
 
 
 class LangChainService:
@@ -26,15 +32,14 @@ class LangChainService:
 
     def _build_messages(
         self,
-        agent: Agent,
         history: list[Message],
         user_content: str,
     ) -> list[BaseMessage]:
         """Build LangChain message list from history and new user message."""
         messages: list[BaseMessage] = []
 
-        if agent.system_prompt:
-            messages.append(SystemMessage(content=agent.system_prompt))
+        if LLM_CONFIG["system_prompt"]:
+            messages.append(SystemMessage(content=LLM_CONFIG["system_prompt"]))
 
         for msg in history:
             if msg.role == MessageRole.user:
@@ -45,18 +50,17 @@ class LangChainService:
         messages.append(HumanMessage(content=user_content))
         return messages
 
-    def _create_llm(self, agent: Agent) -> ChatOpenAI:
-        """Create ChatOpenAI instance from agent config."""
+    def _create_llm(self) -> ChatOpenAI:
+        """Create ChatOpenAI instance from platform config."""
         return ChatOpenAI(
-            model=agent.model,
+            model=LLM_CONFIG["model"],
             streaming=True,
-            temperature=0.7,
+            temperature=LLM_CONFIG["temperature"],
         )
 
     async def stream_response(
         self,
         thread_id: uuid.UUID,
-        agent: Agent,
         history: list[Message],
         user_content: str,
     ) -> AsyncGenerator[str, None]:
@@ -78,8 +82,8 @@ class LangChainService:
                 _active_tasks[thread_id] = task
 
         try:
-            messages = self._build_messages(agent, history, user_content)
-            llm = self._create_llm(agent)
+            messages = self._build_messages(history, user_content)
+            llm = self._create_llm()
 
             full_content = ""
             async for chunk in llm.astream(messages):

@@ -33,5 +33,6 @@ async def get_tenant_agents(
     tenant_id: uuid.UUID,
     service: AgentService = Depends(get_agent_service),
 ) -> list[AgentRead]:
-    agents = await service.get_by_tenant(tenant_id)
+    """Tenant agents (human) + platform LLM agents available for threads."""
+    agents = await service.get_available_for_tenant(tenant_id)
     return [AgentRead.model_validate(a) for a in agents]

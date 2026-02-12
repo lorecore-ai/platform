@@ -4,6 +4,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.modules.agents.deps import get_agent_service
+from app.modules.agents.models import AgentType
 from app.modules.agents.schemas import AgentCreate, AgentRead, AgentUpdate
 from app.modules.agents.service import AgentService
 
@@ -20,6 +21,11 @@ async def create_agent(
     data: AgentCreate,
     service: AgentService = Depends(get_agent_service),
 ) -> AgentRead:
+    if data.type != AgentType.Human:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant can only create human agents; system/worker agents are platform-managed",
+        )
     agent = await service.create(tenant_id, data)
     return AgentRead.model_validate(agent)
 
@@ -35,6 +41,16 @@ async def update_agent(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Agent not found",
+        )
+    if agent.tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Platform agents cannot be updated",
+        )
+    if data.type is not None and data.type != AgentType.Human:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant agents must remain human type",
         )
     agent = await service.update(agent, data)
     return AgentRead.model_validate(agent)

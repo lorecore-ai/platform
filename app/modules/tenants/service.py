@@ -22,6 +22,6 @@ class TenantService:
         await self._session.flush()
         await self._session.refresh(tenant)
 
-        await self._agent_service.create_default_for_tenant(tenant.id)
+        await self._agent_service.create_human_for_tenant(tenant.id)
 
         return tenant
