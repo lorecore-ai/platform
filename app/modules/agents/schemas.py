@@ -13,6 +13,13 @@ class AgentCreate(BaseModel):
     system_prompt: str = Field(default="")
 
 
+class AgentUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=255)
+    type: AgentType | None = None
+    model: str | None = Field(None, max_length=255)
+    system_prompt: str | None = None
+
+
 class AgentRead(BaseModel):
     id: uuid.UUID
     tenant_id: uuid.UUID

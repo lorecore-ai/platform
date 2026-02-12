@@ -12,7 +12,9 @@ dependencies = [
     "pydantic>=2",
     "httpx",
     "hvac",
-    "clickhouse-connect"
+    "clickhouse-connect",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
 ]
 
 [tool.setuptools.packages.find]
