@@ -21,7 +21,8 @@ dist/
 Thumbs.db                  # Windows
 
 # Secret files
-.env                       # Environment variables
+.env
+**/.env
 .flaskenv
 
 # Testing and coverage
