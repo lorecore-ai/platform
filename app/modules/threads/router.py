@@ -6,7 +6,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.modules.agents.deps import get_agent_service
-from app.modules.agents.models import AgentType
 from app.modules.agents.service import AgentService
 from app.modules.threads.deps import (
     get_langchain_service,
@@ -29,36 +28,25 @@ def _thread_not_found() -> HTTPException:
 
 
 @router.post(
-    "/tenant/{tenant_id}",
+    "/",
     response_model=ThreadRead,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_thread(
-    tenant_id: uuid.UUID,
     data: ThreadCreate,
     thread_service: ThreadService = Depends(get_thread_service),
-    agent_service: AgentService = Depends(get_agent_service),
 ) -> ThreadRead:
-    agent = await agent_service.get_by_id(data.agent_id)
-    if not agent:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Agent not found",
-        )
-    if agent.type not in (AgentType.System, AgentType.Worker):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Thread must use a system or worker agent",
-        )
-    is_platform = agent.tenant_id is None
-    is_tenant_agent = agent.tenant_id == tenant_id
-    if not (is_platform or is_tenant_agent):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Agent not found or does not belong to tenant",
-        )
-    thread = await thread_service.create(tenant_id, data)
-    return ThreadRead.model_validate(thread)
+    """Create thread. Agents added when they send messages."""
+    thread = await thread_service.create(data.tenant_id, data)
+    return ThreadRead(
+        id=thread.id,
+        tenant_id=thread.tenant_id,
+        agent_ids=[],  # no agents on create
+        title=thread.title,
+        metadata_=thread.metadata_,
+        created_at=thread.created_at,
+        updated_at=thread.updated_at,
+    )
 
 
 @router.get("/tenant/{tenant_id}", response_model=list[ThreadRead])
@@ -67,7 +55,7 @@ async def list_threads(
     thread_service: ThreadService = Depends(get_thread_service),
 ) -> list[ThreadRead]:
     threads = await thread_service.get_by_tenant(tenant_id)
-    return [ThreadRead.model_validate(t) for t in threads]
+    return [ThreadRead.from_thread(t) for t in threads]
 
 
 @router.get("/{thread_id}", response_model=ThreadRead)
@@ -78,7 +66,7 @@ async def get_thread(
     thread = await thread_service.get(thread_id)
     if not thread:
         raise _thread_not_found()
-    return ThreadRead.model_validate(thread)
+    return ThreadRead.from_thread(thread)
 
 
 @router.delete("/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -102,7 +90,7 @@ async def get_thread_messages(
     if not thread:
         raise _thread_not_found()
     messages = await message_service.get_history(thread_id)
-    return [MessageRead.model_validate(m) for m in messages]
+    return [MessageRead.from_message(m) for m in messages]
 
 
 @router.post("/{thread_id}/messages")
@@ -114,19 +102,38 @@ async def send_message(
     agent_service: AgentService = Depends(get_agent_service),
     langchain_service: LangChainService = Depends(get_langchain_service),
 ) -> StreamingResponse:
+    """Send message from agent_id. LLM response is from system agent."""
     thread = await thread_service.get(thread_id)
     if not thread:
         raise _thread_not_found()
 
-    agent = await agent_service.get_by_id(thread.agent_id)
-    if not agent or agent.type not in (AgentType.System, AgentType.Worker):
+    author_agent = await agent_service.get_by_id(data.agent_id)
+    if not author_agent:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Agent not found or invalid",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent not found",
+        )
+    is_tenant_agent = author_agent.tenant_id == thread.tenant_id
+    is_platform = author_agent.tenant_id is None
+    if not (is_tenant_agent or is_platform):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Agent does not belong to thread's tenant",
         )
 
+    system_agent = await agent_service.get_system_agent_for_tenant(thread.tenant_id)
+    if not system_agent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Tenant has no system agent to respond",
+        )
+
+    await thread_service.ensure_agent_in_thread(thread_id, data.agent_id)
+
     history = await message_service.get_history(thread_id)
-    await message_service.create(thread_id, MessageRole.user, data.content)
+    await message_service.create(
+        thread_id, data.agent_id, MessageRole.user, data.content
+    )
 
     async def event_stream():
         collected = []
@@ -142,8 +149,11 @@ async def send_message(
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
 
+        await thread_service.ensure_agent_in_thread(thread_id, system_agent.id)
         full_content = "".join(collected)
-        await message_service.create(thread_id, MessageRole.assistant, full_content)
+        await message_service.create(
+            thread_id, system_agent.id, MessageRole.assistant, full_content
+        )
 
     return StreamingResponse(
         event_stream(),
