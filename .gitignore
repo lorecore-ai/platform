@@ -17,6 +17,7 @@ dist/
 .project
 .idea/
 .vscode/
+.cursor/
 
 # OS-specific files
 # macOS

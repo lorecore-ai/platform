@@ -54,6 +54,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with session_context() as session:
         yield session
 
+
 async def init_db() -> None:
     """Create all tables. Call on app startup if you use Base.metadata.create_all."""
     async with engine.begin() as conn:

@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn[standard]",
     "sqlalchemy>=2.0",
     "asyncpg",
+    "psycopg2-binary",
     "pydantic>=2",
     "httpx",
     "hvac",

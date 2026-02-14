@@ -32,4 +32,7 @@ class Agent(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    type: Mapped[AgentType] = mapped_column(Enum(AgentType), nullable=False)
+    type: Mapped[AgentType] = mapped_column(
+        Enum(AgentType, values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
