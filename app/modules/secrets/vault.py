@@ -35,4 +35,4 @@ class VaultSecretsManager(SecretsManager):
         pass
 
     def _path(self, tenant_id: str, integration: str) -> str:
-        return f"{self.prefix}/{tenant_id}/{integration}/"
+        return f"{self.prefix}/{tenant_id}/{integration}"

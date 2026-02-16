@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from app.api.router import api_router
 from app.core.database import close_db, init_db
 from app.integrations.bootstrap import init_integrations
+from app.modules.agents.bootstrap import init_agents
 from app.integrations.models import Action
 from app.modules.integrations.deps import get_integration_service
 from app.modules.secrets.deps import get_secrets
@@ -23,6 +24,7 @@ logging.basicConfig(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    await init_agents()
     secrets = await init_secrets(app)
     await init_integrations(app, secrets)
     yield
