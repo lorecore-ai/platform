@@ -5,17 +5,12 @@ from sqlalchemy import String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.database import Base
+from app.core.database import BaseEntity
 
 
-class Event(Base):
+class Event(BaseEntity):
     __tablename__ = "events"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
     tenant_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     integration_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

@@ -12,16 +12,22 @@ dist/
 *.egg-info/
 
 # Editor/IDE-specific files
+# JetBrains IDEs (PyCharm, etc)
+ # VS Code
 .project
-.idea/                     # JetBrains IDEs (PyCharm, etc)
-.vscode/                   # VS Code
+.idea/
+.vscode/
+.cursor/
 
 # OS-specific files
-.DS_Store                  # macOS
-Thumbs.db                  # Windows
+# macOS
+.DS_Store
+# Windows
+Thumbs.db
 
 # Secret files
-.env                       # Environment variables
+.env
+**/.env
 .flaskenv
 
 # Testing and coverage
