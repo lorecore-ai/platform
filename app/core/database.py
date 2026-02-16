@@ -2,13 +2,6 @@
 PostgreSQL connection via SQLAlchemy async engine.
 """
 import os
-<<<<<<< HEAD
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
-
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
-=======
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -18,7 +11,6 @@ from sqlalchemy import DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
->>>>>>> feature/threads
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -110,10 +102,6 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with session_context() as session:
         yield session
 
-<<<<<<< HEAD
-=======
-
->>>>>>> feature/threads
 async def init_db() -> None:
     """Create all tables. Call on app startup if you use Base.metadata.create_all."""
     async with engine.begin() as conn:

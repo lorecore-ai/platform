@@ -140,6 +140,7 @@ async def send_message(
         try:
             async for chunk in langchain_service.stream_response(
                 thread_id=thread_id,
+                tenant_id=thread.tenant_id,
                 history=history,
                 user_content=data.content,
             ):

@@ -1,6 +1,7 @@
 """LangChain service: LLM streaming with cancellation support."""
 import asyncio
 import logging
+import os
 import uuid
 from typing import AsyncGenerator
 
@@ -8,6 +9,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_openai import ChatOpenAI
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.secrets.base import SecretsManager
 from app.modules.threads.models import Message, MessageRole
 
 logger = logging.getLogger(__name__)
@@ -27,8 +29,13 @@ LLM_CONFIG = {
 class LangChainService:
     """Service for streaming LLM responses with per-thread cancellation."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        secrets: SecretsManager,
+    ) -> None:
         self._session = session
+        self._secrets = secrets
 
     def _build_messages(
         self,
@@ -50,17 +57,32 @@ class LangChainService:
         messages.append(HumanMessage(content=user_content))
         return messages
 
-    def _create_llm(self) -> ChatOpenAI:
+    async def _get_openai_api_key(self, tenant_id: uuid.UUID) -> str | None:
+        """Get OpenAI API key from Vault (tenant or platform) or env fallback."""
+        for tid in (str(tenant_id), "platform"):
+            try:
+                creds = await self._secrets.get(tenant_id=tid, integration="openai")
+                if api_key := creds.get("api_key"):
+                    return api_key
+            except Exception as e:
+                logger.debug("OpenAI key not found in Vault for %s: %s", tid, e)
+        return os.getenv("OPENAI_API_KEY")
+
+    def _create_llm(self, api_key: str | None) -> ChatOpenAI:
         """Create ChatOpenAI instance from platform config."""
-        return ChatOpenAI(
-            model=LLM_CONFIG["model"],
-            streaming=True,
-            temperature=LLM_CONFIG["temperature"],
-        )
+        kwargs = {
+            "model": LLM_CONFIG["model"],
+            "streaming": True,
+            "temperature": LLM_CONFIG["temperature"],
+        }
+        if api_key:
+            kwargs["api_key"] = api_key
+        return ChatOpenAI(**kwargs)
 
     async def stream_response(
         self,
         thread_id: uuid.UUID,
+        tenant_id: uuid.UUID,
         history: list[Message],
         user_content: str,
     ) -> AsyncGenerator[str, None]:
@@ -82,8 +104,9 @@ class LangChainService:
                 _active_tasks[thread_id] = task
 
         try:
+            api_key = await self._get_openai_api_key(tenant_id)
             messages = self._build_messages(history, user_content)
-            llm = self._create_llm()
+            llm = self._create_llm(api_key)
 
             full_content = ""
             async for chunk in llm.astream(messages):
