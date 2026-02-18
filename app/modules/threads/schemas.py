@@ -55,15 +55,23 @@ class MessageCreate(BaseModel):
     agent_id: uuid.UUID = Field(..., description="Agent who sends the message")
 
 
+class MessageAccepted(BaseModel):
+    """Response for accepted message (202)."""
+
+    message_id: uuid.UUID
+    status: str = Field(description="'processing' if LLM started, 'queued' if LLM is busy")
+
+
 class MessageRead(BaseModel):
     id: uuid.UUID
     thread_id: uuid.UUID
     agent_id: uuid.UUID
     role: MessageRole
     content: str
+    metadata_: dict | None = Field(default=None, serialization_alias="metadata")
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
     @classmethod
     def from_message(cls, message: Message) -> "MessageRead":
@@ -74,5 +82,6 @@ class MessageRead(BaseModel):
             agent_id=message.agent_id,
             role=message.role,
             content=message.content,
+            metadata_=message.metadata_,
             created_at=message.created_at,
         )

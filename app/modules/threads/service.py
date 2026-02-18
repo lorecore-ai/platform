@@ -74,12 +74,14 @@ class MessageService:
         agent_id: uuid.UUID,
         role: MessageRole,
         content: str,
+        metadata: dict | None = None,
     ) -> Message:
         message = Message(
             thread_id=thread_id,
             agent_id=agent_id,
             role=role,
             content=content,
+            metadata_=metadata,
         )
         self._session.add(message)
         await self._session.flush()

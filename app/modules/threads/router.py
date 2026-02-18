@@ -1,21 +1,32 @@
-"""Threads API router: CRUD and streaming."""
+"""Threads API router: CRUD, message queue, and SSE streaming."""
+import asyncio
 import json
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.modules.agents.deps import get_agent_service
 from app.modules.agents.service import AgentService
+from app.modules.agent_runtime.message_queue import QueuedMessage, queue_manager
+from app.modules.agent_runtime.service import AgentRuntimeService
 from app.modules.threads.deps import (
-    get_langchain_service,
+    get_agent_runtime_service,
     get_message_service,
     get_thread_service,
 )
 from app.modules.threads.models import MessageRole
-from app.modules.threads.schemas import MessageCreate, MessageRead, ThreadCreate, ThreadRead
+from app.modules.threads.schemas import (
+    MessageAccepted,
+    MessageCreate,
+    MessageRead,
+    ThreadCreate,
+    ThreadRead,
+)
 from app.modules.threads.service import MessageService, ThreadService
-from app.modules.threads.langchain_service import LangChainService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/threads", tags=["threads"])
 
@@ -26,6 +37,8 @@ def _thread_not_found() -> HTTPException:
         detail="Thread not found",
     )
 
+
+# ---------- Thread CRUD (unchanged) ----------
 
 @router.post(
     "/",
@@ -41,7 +54,7 @@ async def create_thread(
     return ThreadRead(
         id=thread.id,
         tenant_id=thread.tenant_id,
-        agent_ids=[],  # no agents on create
+        agent_ids=[],
         title=thread.title,
         metadata_=thread.metadata_,
         created_at=thread.created_at,
@@ -93,16 +106,29 @@ async def get_thread_messages(
     return [MessageRead.from_message(m) for m in messages]
 
 
-@router.post("/{thread_id}/messages")
+# ---------- New message send (queue-based, non-blocking) ----------
+
+@router.post(
+    "/{thread_id}/messages",
+    response_model=MessageAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def send_message(
     thread_id: uuid.UUID,
     data: MessageCreate,
     thread_service: ThreadService = Depends(get_thread_service),
     message_service: MessageService = Depends(get_message_service),
     agent_service: AgentService = Depends(get_agent_service),
-    langchain_service: LangChainService = Depends(get_langchain_service),
-) -> StreamingResponse:
-    """Send message from agent_id. LLM response is from system agent."""
+    runtime_service: AgentRuntimeService = Depends(get_agent_runtime_service),
+) -> JSONResponse:
+    """Accept a user message. Returns 202 immediately.
+
+    If the LLM is idle, processing starts right away (status="processing").
+    If the LLM is busy with a previous message, the message is queued
+    and will be merged into the next LLM invocation (status="queued").
+
+    Subscribe to GET /{thread_id}/stream for SSE delivery of the response.
+    """
     thread = await thread_service.get(thread_id)
     if not thread:
         raise _thread_not_found()
@@ -130,34 +156,112 @@ async def send_message(
 
     await thread_service.ensure_agent_in_thread(thread_id, data.agent_id)
 
-    history = await message_service.get_history(thread_id)
-    await message_service.create(
+    user_message = await message_service.create(
         thread_id, data.agent_id, MessageRole.user, data.content
     )
 
-    async def event_stream():
-        collected = []
-        try:
-            async for chunk in langchain_service.stream_response(
+    queued = QueuedMessage(message_id=user_message.id, content=data.content)
+    queue_status = await queue_manager.enqueue(thread_id, queued)
+
+    if queue_status == "processing":
+        asyncio.create_task(
+            _process_loop(
                 thread_id=thread_id,
                 tenant_id=thread.tenant_id,
-                history=history,
-                user_content=data.content,
-            ):
-                collected.append(chunk)
-                yield f"data: {json.dumps({'content': chunk})}\n\n"
-        except Exception as e:
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
-            return
-
-        await thread_service.ensure_agent_in_thread(thread_id, system_agent.id)
-        full_content = "".join(collected)
-        await message_service.create(
-            thread_id, system_agent.id, MessageRole.assistant, full_content
+                system_agent_id=system_agent.id,
+                runtime_service=runtime_service,
+                thread_service=thread_service,
+                message_service=message_service,
+            )
         )
 
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={
+            "message_id": str(user_message.id),
+            "status": queue_status,
+        },
+    )
+
+
+async def _process_loop(
+    thread_id: uuid.UUID,
+    tenant_id: uuid.UUID,
+    system_agent_id: uuid.UUID,
+    runtime_service: AgentRuntimeService,
+    thread_service: ThreadService,
+    message_service: MessageService,
+) -> None:
+    """Background processing loop: drain queue, merge messages, run graph, repeat."""
+    try:
+        while True:
+            user_messages = await queue_manager.drain_and_merge(thread_id)
+            if not user_messages:
+                break
+
+            collected_content = ""
+            metadata: dict | None = None
+
+            async for event in runtime_service.stream_response(
+                thread_id=thread_id,
+                tenant_id=tenant_id,
+                user_messages=user_messages,
+            ):
+                await queue_manager.broadcast(thread_id, event)
+
+                if event.get("type") == "chunk":
+                    collected_content += event.get("content", "")
+                elif event.get("type") == "guardrail_reject":
+                    collected_content = event.get("reason", "Message rejected")
+                elif event.get("type") == "done":
+                    metadata = event.get("metadata")
+
+            await thread_service.ensure_agent_in_thread(thread_id, system_agent_id)
+            await message_service.create(
+                thread_id,
+                system_agent_id,
+                MessageRole.assistant,
+                collected_content or "(no response)",
+                metadata=metadata,
+            )
+
+            has_more = await queue_manager.mark_done(thread_id)
+            if not has_more:
+                break
+
+    except Exception:
+        logger.exception("Error in processing loop for thread %s", thread_id)
+    finally:
+        await queue_manager.broadcast(
+            thread_id, {"type": "stream_end"}
+        )
+
+
+# ---------- SSE stream endpoint ----------
+
+@router.get("/{thread_id}/stream")
+async def stream_thread_events(
+    thread_id: uuid.UUID,
+    thread_service: ThreadService = Depends(get_thread_service),
+) -> StreamingResponse:
+    """SSE endpoint: subscribe to real-time events for a thread.
+
+    Event types:
+    - data: {"type": "chunk", "content": "..."}
+    - data: {"type": "guardrail_reject", "reason": "..."}
+    - data: {"type": "done", "metadata": {...}}
+    - data: {"type": "stream_end"}
+    """
+    thread = await thread_service.get(thread_id)
+    if not thread:
+        raise _thread_not_found()
+
+    async def event_generator():
+        async for event in queue_manager.subscribe(thread_id):
+            yield f"data: {json.dumps(event)}\n\n"
+
     return StreamingResponse(
-        event_stream(),
+        event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

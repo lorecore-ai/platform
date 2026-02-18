@@ -75,6 +75,11 @@ class Message(BaseEntity):
     )
     role: Mapped[MessageRole] = mapped_column(Enum(MessageRole), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+    )
 
     thread: Mapped["Thread"] = relationship("Thread", back_populates="messages")
     agent: Mapped["Agent"] = relationship("Agent", back_populates="messages")

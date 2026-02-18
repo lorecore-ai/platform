@@ -1,8 +1,16 @@
-"""LangChain service: LLM streaming with cancellation support."""
+"""LangChain service: LLM streaming with cancellation support.
+
+.. deprecated::
+    This module is superseded by ``app.modules.agent_runtime.service.AgentRuntimeService``
+    which provides LangGraph-based processing with guardrails, memory management,
+    cost tracking, and message queue support. This module is kept for backward
+    compatibility and will be removed in a future release.
+"""
 import asyncio
 import logging
 import os
 import uuid
+import warnings
 from typing import AsyncGenerator
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -27,13 +35,22 @@ LLM_CONFIG = {
 
 
 class LangChainService:
-    """Service for streaming LLM responses with per-thread cancellation."""
+    """Service for streaming LLM responses with per-thread cancellation.
+
+    .. deprecated::
+        Use ``AgentRuntimeService`` from ``app.modules.agent_runtime`` instead.
+    """
 
     def __init__(
         self,
         session: AsyncSession,
         secrets: SecretsManager,
     ) -> None:
+        warnings.warn(
+            "LangChainService is deprecated, use AgentRuntimeService",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._session = session
         self._secrets = secrets
 

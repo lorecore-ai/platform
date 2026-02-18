@@ -8,6 +8,7 @@ from app.api.router import api_router
 from app.core.database import close_db, init_db
 from app.integrations.bootstrap import init_integrations
 from app.modules.agents.bootstrap import init_agents
+from app.modules.agent_runtime.checkpointer import close_checkpointer, get_checkpointer
 from app.integrations.models import Action
 from app.modules.integrations.deps import get_integration_service
 from app.modules.secrets.deps import get_secrets
@@ -27,7 +28,9 @@ async def lifespan(app: FastAPI):
     await init_agents()
     secrets = await init_secrets(app)
     await init_integrations(app, secrets)
+    await get_checkpointer()
     yield
+    await close_checkpointer()
     await close_db()
 
 
